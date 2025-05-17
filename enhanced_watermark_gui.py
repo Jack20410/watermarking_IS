@@ -5,13 +5,14 @@ import numpy as np
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QLabel, QComboBox, QFileDialog, QProgressBar,
                              QGroupBox, QRadioButton, QMessageBox, QTabWidget, QSplitter,
-                             QSlider)
+                             QSlider, QScrollArea)
 from PyQt5.QtGui import QPixmap, QImage
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 
 # Import watermarking modules
 from dct_watermark import DCT_Watermark
 from attack import Attack
+from evaluation import WatermarkEvaluator  # Import our new evaluation module
 
 # Create output directory if it doesn't exist
 if not os.path.exists("output"):
@@ -499,6 +500,7 @@ class EnhancedWatermarkingApp(QMainWindow):
         super().__init__()
         self.setWindowTitle("Enhanced Digital Watermarking Application")
         self.setGeometry(100, 100, 1200, 800)
+        self.setMinimumSize(800, 600)  # Set minimum window size
         self.init_ui()
 
     def init_ui(self):
@@ -917,74 +919,299 @@ class EnhancedWatermarkingApp(QMainWindow):
         splitter.setSizes([400, 800])
 
     def setup_evaluate_tab(self, tab):
-        layout = QVBoxLayout()
-        tab.setLayout(layout)
+        main_layout = QVBoxLayout()
+        tab.setLayout(main_layout)
         
-        info_label = QLabel("This tab allows you to evaluate the robustness of watermarking algorithms against various attacks.")
-        info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(info_label)
+        # Header with description
+        header = QLabel("Watermark Robustness Evaluation")
+        header.setStyleSheet("font-size: 16pt; font-weight: bold; margin-bottom: 10px;")
+        header.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
-        # Watermarked image selection
-        image_group = QGroupBox("Select Watermarked Image")
+        description = QLabel("Analyze how well your watermark survives against different types of attacks")
+        description.setStyleSheet("font-size: 10pt; color: #555555; margin-bottom: 15px;")
+        description.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        main_layout.addWidget(header)
+        main_layout.addWidget(description)
+        
+        # Main content splitter (horizontal layout)
+        main_splitter = QSplitter(Qt.Orientation.Horizontal)
+        main_layout.addWidget(main_splitter, 1)  # Give it stretch factor
+        
+        # === Left panel: Controls ===
+        controls_widget = QWidget()
+        controls_layout = QVBoxLayout()
+        controls_widget.setLayout(controls_layout)
+        controls_widget.setMinimumWidth(300)
+        
+        # Step 1: Select Image
+        step1_group = QGroupBox("Step 1: Select Watermarked Image")
+        step1_group.setStyleSheet("QGroupBox { font-weight: bold; }")
+        step1_layout = QVBoxLayout()
+        step1_group.setLayout(step1_layout)
+        
         image_layout = QHBoxLayout()
-        image_group.setLayout(image_layout)
-        
         self.eval_image_path_label = QLabel("No file selected")
+        self.eval_image_path_label.setStyleSheet("background-color: #f5f5f5; padding: 5px; border-radius: 3px;")
+        self.eval_image_preview_small = QLabel()
+        self.eval_image_preview_small.setFixedSize(80, 80)
+        self.eval_image_preview_small.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.eval_image_preview_small.setStyleSheet("background-color: #e0e0e0; border-radius: 5px;")
+        
         image_browse_btn = QPushButton("Browse...")
+        image_browse_btn.setStyleSheet("background-color: #3a86ff; color: white; font-weight: bold; padding: 5px 15px;")
         image_browse_btn.clicked.connect(lambda: self.browse_file("evaluate"))
         
-        image_layout.addWidget(self.eval_image_path_label)
+        image_layout.addWidget(self.eval_image_path_label, 1)
         image_layout.addWidget(image_browse_btn)
         
-        layout.addWidget(image_group)
+        step1_layout.addLayout(image_layout)
+        step1_layout.addWidget(self.eval_image_preview_small, 0, Qt.AlignmentFlag.AlignCenter)
         
-        # Algorithm selection
-        algorithm_group = QGroupBox("Select Algorithm")
-        algorithm_layout = QHBoxLayout()
-        algorithm_group.setLayout(algorithm_layout)
+        # Step 2: Algorithm Selection
+        step2_group = QGroupBox("Step 2: Select Algorithm")
+        step2_group.setStyleSheet("QGroupBox { font-weight: bold; }")
+        step2_layout = QVBoxLayout()
+        step2_group.setLayout(step2_layout)
         
-        self.eval_dct_radio = QRadioButton("DCT")
+        self.eval_dct_radio = QRadioButton("DCT (Discrete Cosine Transform)")
         self.eval_dct_radio.setChecked(True)
+        self.eval_dct_radio.setStyleSheet("padding: 5px;")
         
-        algorithm_layout.addWidget(self.eval_dct_radio)
+        algorithm_description = QLabel("DCT embeds watermarks in the frequency domain of the image")
+        algorithm_description.setStyleSheet("font-style: italic; color: #555555; padding-left: 20px;")
+        algorithm_description.setWordWrap(True)
         
-        layout.addWidget(algorithm_group)
+        step2_layout.addWidget(self.eval_dct_radio)
+        step2_layout.addWidget(algorithm_description)
         
-        # Attacks to evaluate
-        attacks_group = QGroupBox("Select Attacks to Evaluate")
+        # Step 3: Attack Selection
+        step3_group = QGroupBox("Step 3: Select Attack Type")
+        step3_group.setStyleSheet("QGroupBox { font-weight: bold; }")
+        step3_layout = QVBoxLayout()
+        step3_group.setLayout(step3_layout)
+        
+        # Organize attacks by categories in a scrollable area
+        attacks_scroll = QScrollArea()
+        attacks_scroll.setWidgetResizable(True)
+        attacks_scroll.setStyleSheet("QScrollArea { border: none; }")
+        
+        attacks_container = QWidget()
         attacks_layout = QVBoxLayout()
-        attacks_group.setLayout(attacks_layout)
+        attacks_container.setLayout(attacks_layout)
         
+        # Create a single button group for all attack types
+        from PyQt5.QtWidgets import QButtonGroup
+        self.attack_button_group = QButtonGroup()
+        
+        # Create attack categories
         self.eval_attacks = {}
-        attack_types = [
-            "blur", "rotate180", "rotate90", "chop5", "chop10", "chop30",
-            "gray", "saltnoise", "randline", "cover", "brighter10", 
-            "darker10", "largersize", "smallersize"
-        ]
         
-        for attack in attack_types:
-            self.eval_attacks[attack] = QRadioButton(attack)
-            attacks_layout.addWidget(self.eval_attacks[attack])
+        # Geometric attacks
+        geometric_group = QGroupBox("Geometric Attacks")
+        geometric_group.setStyleSheet("QGroupBox { font-weight: bold; color: #e63946; }")
+        geometric_layout = QVBoxLayout()
+        geometric_group.setLayout(geometric_layout)
         
+        self.eval_attacks["rotate90"] = QRadioButton("Rotate 90°")
+        self.eval_attacks["rotate180"] = QRadioButton("Rotate 180°")
+        self.eval_attacks["chop5"] = QRadioButton("Crop 5%")
+        self.eval_attacks["chop10"] = QRadioButton("Crop 10%")
+        self.eval_attacks["chop30"] = QRadioButton("Crop 30%")
+        self.eval_attacks["largersize"] = QRadioButton("Enlarge")
+        self.eval_attacks["smallersize"] = QRadioButton("Shrink")
+        
+        for attack in ["rotate90", "rotate180", "chop5", "chop10", "chop30", "largersize", "smallersize"]:
+            geometric_layout.addWidget(self.eval_attacks[attack])
+            # Add each radio button to the button group
+            self.attack_button_group.addButton(self.eval_attacks[attack])
+        
+        # Noise attacks
+        noise_group = QGroupBox("Noise & Filter Attacks")
+        noise_group.setStyleSheet("QGroupBox { font-weight: bold; color: #118ab2; }")
+        noise_layout = QVBoxLayout()
+        noise_group.setLayout(noise_layout)
+        
+        self.eval_attacks["blur"] = QRadioButton("Gaussian Blur")
+        self.eval_attacks["saltnoise"] = QRadioButton("Salt & Pepper Noise")
+        self.eval_attacks["randline"] = QRadioButton("Random Lines")
+        self.eval_attacks["cover"] = QRadioButton("Cover Regions")
+        
+        for attack in ["blur", "saltnoise", "randline", "cover"]:
+            noise_layout.addWidget(self.eval_attacks[attack])
+            # Add each radio button to the button group
+            self.attack_button_group.addButton(self.eval_attacks[attack])
+        
+        # Color/intensity attacks
+        color_group = QGroupBox("Color & Intensity Attacks")
+        color_group.setStyleSheet("QGroupBox { font-weight: bold; color: #06d6a0; }")
+        color_layout = QVBoxLayout()
+        color_group.setLayout(color_layout)
+        
+        self.eval_attacks["gray"] = QRadioButton("Grayscale Conversion")
+        self.eval_attacks["brighter10"] = QRadioButton("Increase Brightness 10%")
+        self.eval_attacks["darker10"] = QRadioButton("Decrease Brightness 10%")
+        
+        for attack in ["gray", "brighter10", "darker10"]:
+            color_layout.addWidget(self.eval_attacks[attack])
+            # Add each radio button to the button group
+            self.attack_button_group.addButton(self.eval_attacks[attack])
+        
+        # Add all categories to the attacks layout
+        attacks_layout.addWidget(geometric_group)
+        attacks_layout.addWidget(noise_group)
+        attacks_layout.addWidget(color_group)
+        attacks_layout.addStretch()
+        
+        # Set default selection
         self.eval_attacks["blur"].setChecked(True)
         
-        layout.addWidget(attacks_group)
+        attacks_scroll.setWidget(attacks_container)
+        step3_layout.addWidget(attacks_scroll)
         
-        # Run evaluation button
-        eval_btn = QPushButton("Run Evaluation")
+        # Buttons: Run Evaluation and Reset
+        eval_btn = QPushButton("▶ Run Evaluation")
+        eval_btn.setMinimumHeight(50)
+        eval_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                font-size: 14pt;
+                font-weight: bold;
+                border-radius: 5px;
+                padding: 10px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+            QPushButton:pressed {
+                background-color: #3e8e41;
+            }
+        """)
         eval_btn.clicked.connect(self.run_evaluation)
-        layout.addWidget(eval_btn)
         
-        # Results area
-        results_group = QGroupBox("Evaluation Results")
+        # Add reset button
+        reset_btn = QPushButton("⟲ Reset")
+        reset_btn.setMinimumHeight(40)
+        reset_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #f44336;
+                color: white;
+                font-size: 12pt;
+                font-weight: bold;
+                border-radius: 5px;
+                padding: 5px;
+            }
+            QPushButton:hover {
+                background-color: #d32f2f;
+            }
+            QPushButton:pressed {
+                background-color: #b71c1c;
+            }
+        """)
+        reset_btn.clicked.connect(self.reset_evaluation)
+        
+        # Create button layout
+        button_layout = QHBoxLayout()
+        button_layout.addWidget(eval_btn, 2)  # Give more space to the evaluation button
+        button_layout.addWidget(reset_btn, 1)
+        
+        # Add all steps to controls layout
+        controls_layout.addWidget(step1_group)
+        controls_layout.addWidget(step2_group)
+        controls_layout.addWidget(step3_group)
+        controls_layout.addLayout(button_layout)
+        
+        # === Right panel: Results ===
+        results_widget = QWidget()
         results_layout = QVBoxLayout()
-        results_group.setLayout(results_layout)
+        results_widget.setLayout(results_layout)
         
-        self.eval_results = QLabel("Run evaluation to see results")
-        self.eval_results.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        results_layout.addWidget(self.eval_results)
+        # Results header
+        results_header = QLabel("Evaluation Results")
+        results_header.setStyleSheet("font-size: 14pt; font-weight: bold;")
+        results_header.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
-        layout.addWidget(results_group)
+        # Results container (vertical split between report and visualization)
+        results_splitter = QSplitter(Qt.Orientation.Vertical)
+        
+        # Top part: HTML Report in scrollable area
+        report_container = QWidget()
+        report_layout = QVBoxLayout()
+        report_container.setLayout(report_layout)
+        
+        report_label = QLabel("Watermark Analysis Report")
+        report_label.setStyleSheet("font-weight: bold; color: #444;")
+        
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setStyleSheet("""
+            QScrollArea {
+                background-color: white;
+                border: 1px solid #ddd;
+                border-radius: 5px;
+            }
+        """)
+        
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout()
+        scroll_content.setLayout(scroll_layout)
+        
+        self.eval_results = QLabel("Run evaluation to see detailed analysis")
+        self.eval_results.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self.eval_results.setWordWrap(True)
+        self.eval_results.setTextFormat(Qt.TextFormat.RichText)
+        self.eval_results.setStyleSheet("""
+            QLabel {
+                padding: 10px;
+                background-color: white;
+                color: #333;
+            }
+        """)
+        scroll_layout.addWidget(self.eval_results)
+        scroll_layout.addStretch()
+        
+        scroll_area.setWidget(scroll_content)
+        
+        report_layout.addWidget(report_label)
+        report_layout.addWidget(scroll_area)
+        
+        # Bottom part: Visual comparison
+        visual_container = QWidget()
+        visual_layout = QVBoxLayout()
+        visual_container.setLayout(visual_layout)
+        
+        visual_label = QLabel("Visual Comparison")
+        visual_label.setStyleSheet("font-weight: bold; color: #444;")
+        
+        self.eval_image_preview = QLabel("Visual comparison will appear here after evaluation")
+        self.eval_image_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.eval_image_preview.setMinimumHeight(200)
+        self.eval_image_preview.setStyleSheet("""
+            QLabel {
+                background-color: #f8f9fa;
+                border: 1px dashed #ccc;
+                border-radius: 5px;
+                color: #666;
+            }
+        """)
+        
+        visual_layout.addWidget(visual_label)
+        visual_layout.addWidget(self.eval_image_preview)
+        
+        # Add to results splitter
+        results_splitter.addWidget(report_container)
+        results_splitter.addWidget(visual_container)
+        results_splitter.setSizes([300, 300])  # Equal initial sizes
+        
+        # Add header and results splitter to results layout
+        results_layout.addWidget(results_header)
+        results_layout.addWidget(results_splitter, 1)  # Give it stretch factor
+        
+        # Add both panels to main splitter
+        main_splitter.addWidget(controls_widget)
+        main_splitter.addWidget(results_widget)
+        main_splitter.setSizes([400, 800])  # 1:2 ratio for controls vs results
 
     def setup_detect_tab(self, tab):
         layout = QVBoxLayout()
@@ -1158,7 +1385,7 @@ class EnhancedWatermarkingApp(QMainWindow):
 
         # Set splitter sizes
         splitter.setSizes([400, 800])
-
+        
     def browse_file(self, file_type):
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Select Image File", "", "Image Files (*.png *.jpg *.jpeg *.bmp)"
@@ -1190,6 +1417,9 @@ class EnhancedWatermarkingApp(QMainWindow):
         elif file_type == "evaluate":
             self.eval_image_path = file_path
             self.eval_image_path_label.setText(os.path.basename(file_path))
+            # Update the small preview image in evaluation tab
+            if hasattr(self, 'eval_image_preview_small'):
+                self.display_image(file_path, self.eval_image_preview_small)
             
         elif file_type == "detect_image":
             self.detect_image_path = file_path
@@ -1380,11 +1610,123 @@ class EnhancedWatermarkingApp(QMainWindow):
         if not hasattr(self, 'eval_image_path'):
             QMessageBox.warning(self, "Input Error", "Please select a watermarked image to evaluate")
             return
+
+        # Get selected attacks
+        selected_attack = None
+        for attack_name, radio_btn in self.eval_attacks.items():
+            if radio_btn.isChecked():
+                selected_attack = attack_name
+                break
+
+        if not selected_attack:
+            QMessageBox.warning(self, "Input Error", "Please select at least one attack type")
+            return
+
+        # Start evaluation
+        self.start_evaluation_process(selected_attack)
+
+    def start_evaluation_process(self, attack_type):
+        """Start the evaluation process for the selected attack"""
+        results_dir = os.path.join("output", "evaluation_results")
+        if not os.path.exists(results_dir):
+            os.makedirs(results_dir)
+            
+        # First, create attacked image
+        output_path = os.path.join(results_dir, f"attacked_{attack_type}.png")
         
-        # This would be a more complex implementation that tests various attacks
-        # and compares the algorithms. For now, we'll just show a simple message.
-        QMessageBox.information(self, "Evaluation", "Evaluation feature will be implemented in a future update.")
+        # Initialize worker for attack
+        self.eval_worker = WatermarkWorker(
+            mode="attack",
+            algorithm="DCT",
+            cover_path=self.eval_image_path,
+            signature_path=None,
+            output_path=output_path
+        )
+        self.eval_worker.set_attack_type(attack_type)
         
+        # Connect signals
+        self.eval_worker.progress.connect(lambda v: self.eval_results.setText(f"Processing attack ({v}%)..."))
+        self.eval_worker.finished.connect(lambda img, msg, orig: self.attack_evaluation_finished(img, msg, orig, attack_type))
+        self.eval_worker.error.connect(self.show_error)
+        
+        # Start worker
+        self.eval_worker.start()
+
+    def attack_evaluation_finished(self, attacked_img, message, original_img, attack_type):
+        """Called when attack phase of evaluation is complete"""
+        results_dir = os.path.join("output", "evaluation_results")
+        
+        # Now extract watermark from attacked image
+        output_path = os.path.join(results_dir, f"extracted_from_{attack_type}.png")
+        
+        # Initialize worker for extraction
+        self.eval_extract_worker = WatermarkWorker(
+            mode="extract",
+            algorithm="DCT",
+            cover_path=os.path.join(results_dir, f"attacked_{attack_type}.png"),
+            signature_path=None,
+            output_path=output_path
+        )
+        
+        # Connect signals
+        self.eval_extract_worker.progress.connect(lambda v: self.eval_results.setText(f"Extracting watermark ({v}%)..."))
+        self.eval_extract_worker.finished.connect(
+            lambda img, msg, orig: self.extraction_evaluation_finished(img, msg, orig, attack_type, attacked_img)
+        )
+        self.eval_extract_worker.error.connect(self.show_error)
+        
+        # Start worker
+        self.eval_extract_worker.start()
+
+    def extraction_evaluation_finished(self, extracted_watermark, message, original_img, attack_type, attacked_img):
+        """Called when extraction phase of evaluation is complete"""
+        try:
+            # Use our new WatermarkEvaluator class
+            evaluator = WatermarkEvaluator()
+            
+            # Generate evaluation report
+            report = evaluator.generate_evaluation_report(attack_type, attacked_img, extracted_watermark)
+            
+            # Create visual comparison
+            visual_path = evaluator.create_visual_comparison(attacked_img, extracted_watermark)
+            
+            # Generate HTML report
+            html_report = evaluator.generate_html_report(report, visual_path)
+            
+            # Update the results label with the HTML report
+            self.eval_results.setText(html_report)
+            self.eval_results.setTextFormat(Qt.TextFormat.RichText)
+            
+            # Display the comparison image if available
+            if visual_path and os.path.exists(visual_path):
+                self.display_evaluation_image(visual_path)
+            
+            # Show a success message
+            QMessageBox.information(self, "Evaluation Complete", 
+                                   f"Evaluation for {attack_type} attack completed. Results saved to {evaluator.results_dir}")
+        except Exception as e:
+            QMessageBox.critical(self, "Evaluation Error", f"Error during evaluation: {str(e)}")
+
+    def display_evaluation_image(self, image_path):
+        """Display the evaluation comparison image in the GUI"""
+        try:
+            # Load image using QPixmap
+            pixmap = QPixmap(image_path)
+            
+            # Scale pixmap while preserving aspect ratio
+            pixmap = pixmap.scaled(
+                self.eval_image_preview.width(),
+                self.eval_image_preview.height(),
+                Qt.AspectRatioMode.KeepAspectRatio, 
+                Qt.TransformationMode.SmoothTransformation
+            )
+            
+            # Set the pixmap to the image preview label
+            self.eval_image_preview.setPixmap(pixmap)
+        except Exception as e:
+            self.eval_image_preview.setText(f"Error displaying image: {str(e)}")
+            print(f"Error displaying evaluation image: {str(e)}")
+
     def show_error(self, error_message):
         QMessageBox.critical(self, "Error", error_message)
 
@@ -1536,6 +1878,38 @@ class EnhancedWatermarkingApp(QMainWindow):
         # This method updates the sensitivity value label based on the slider value
         slider_value = self.sensitivity_slider.value()
         self.sensitivity_value_label.setText(f"{slider_value}%")
+
+    # Add reset evaluation method
+    def reset_evaluation(self):
+        """Reset the evaluation tab to its initial state"""
+        # Clear selected image
+        if hasattr(self, 'eval_image_path'):
+            delattr(self, 'eval_image_path')
+        self.eval_image_path_label.setText("No file selected")
+        
+        # Clear the small preview
+        if hasattr(self, 'eval_image_preview_small'):
+            self.eval_image_preview_small.clear()
+            self.eval_image_preview_small.setText("")
+        
+        # Clear the results
+        self.eval_results.setText("Run evaluation to see detailed analysis")
+        
+        # Clear the image preview
+        self.eval_image_preview.clear()
+        self.eval_image_preview.setText("Visual comparison will appear here after evaluation")
+        
+        # Reset attack selection - ensure only Gaussian Blur is selected
+        for attack, radio_btn in self.eval_attacks.items():
+            # First uncheck all
+            radio_btn.setChecked(False)
+        
+        # Then only check the blur option
+        if "blur" in self.eval_attacks:
+            self.eval_attacks["blur"].setChecked(True)
+        
+        # Show confirmation
+        QMessageBox.information(self, "Reset Complete", "Evaluation panel has been reset to initial state")
 
 
 if __name__ == "__main__":

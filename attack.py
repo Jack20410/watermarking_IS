@@ -81,18 +81,55 @@ class Attack:
     @staticmethod
     def randline(img: np.ndarray):
         img = img.copy()
-        cv2.rectangle(img, (384, 0), (510, 128), (0, 255, 0), 3)
-        cv2.rectangle(img, (0, 0), (300, 128), (255, 0, 0), 3)
-        cv2.line(img, (0, 0), (511, 511), (255, 0, 0), 5)
-        cv2.line(img, (0, 511), (511, 0), (255, 0, 255), 5)
+        h, w = img.shape[:2]
+        
+        # Calculate center region coordinates
+        center_x = w // 2
+        center_y = h // 2
+        rect_width = w // 3
+        rect_height = h // 3
+        
+        # Draw rectangles in the center region
+        cv2.rectangle(img, 
+                     (center_x - rect_width//2, center_y - rect_height//2), 
+                     (center_x + rect_width//2, center_y + rect_height//2), 
+                     (0, 255, 0), 3)
+        
+        cv2.rectangle(img, 
+                     (center_x - rect_width//4, center_y - rect_height//4), 
+                     (center_x + rect_width//4, center_y + rect_height//4), 
+                     (255, 0, 0), 3)
+        
+        # Draw crossing lines through the center of the image
+        cv2.line(img, (center_x - rect_width//2, center_y - rect_height//2), 
+                (center_x + rect_width//2, center_y + rect_height//2), 
+                (255, 0, 0), 5)
+        
+        cv2.line(img, (center_x - rect_width//2, center_y + rect_height//2), 
+                (center_x + rect_width//2, center_y - rect_height//2), 
+                (255, 0, 255), 5)
+        
         return img
 
     @staticmethod
     def cover(img: np.ndarray):
         img = img.copy()
-        cv2.circle(img, (256, 256), 63, (0, 0, 255), -1)
+        # Get image dimensions
+        h, w = img.shape[:2]
+        # Place circle in the middle of the image
+        center_x = w // 2
+        center_y = h // 2
+        # Calculate radius as 20% of the smallest dimension
+        radius = min(w, h) // 5
+        # Draw filled circle in the center
+        cv2.circle(img, (center_x, center_y), radius, (0, 0, 255), -1)  # Red circle
+        # Add a white border to make it more visible
+        cv2.circle(img, (center_x, center_y), radius, (255, 255, 255), 3)  # White border
+        
+        # Add text at the bottom of the image
         font = cv2.FONT_HERSHEY_SIMPLEX
-        cv2.putText(img, 'Just DO it ', (10, 500), font, 4, (255, 255, 0), 2)
+        font_scale = w / 500  # Scale font based on image width
+        cv2.putText(img, 'Image Altered', (w//4, h-50), font, font_scale, (255, 255, 0), 2)
         return img
 
     @staticmethod
